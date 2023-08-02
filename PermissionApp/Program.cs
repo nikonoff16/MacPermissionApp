@@ -1,80 +1,109 @@
-﻿using System.Diagnostics;
-using System.Text.RegularExpressions;
-using System.Xml.XPath;
-// See https://aka.ms/new-console-template for more information
-RunApp(args);
+﻿using System.CommandLine;
+using System.CommandLine.Builder;
+using System.CommandLine.Help;
+using System.CommandLine.Parsing;
+using Spectre.Console;
 
-void RunApp(string[] args) 
+namespace PermissionApp;
+
+class Program
 {
-    if (args.Length > 0) 
+    static async Task<int> Main(string[] args)
     {
-        Console.WriteLine($"The argument is {args[0]}");
-        var appId = GetAppId(args[0]);
-        Console.WriteLine(appId);
-        Console.WriteLine(GetPermissions(appId));
-    } 
-    else 
-    {
-        Console.WriteLine("There's no any arguments with this program");
-    }
-}
+        var appPathArgument = new Argument<string>
+            (name: "path", description: "Path to the program that needs to add permissions");
 
-string GetPermissions(string appId, bool micro=true, bool camera=true) 
-{
-    if (File.Exists("tccplus"))
-    {
-        string result = "";
-        if (micro) 
-        {
-            result += StartProcess("./tccplus", $"add Microphone {appId}");
-        }
-        if (camera) 
-        {
-            result += StartProcess("./tccplus", $"add Camera {appId}");
-        }
-        return result;
-    }
-    else 
-    {
-        return "";
-    }
-}
-
-string FindId(string output)
-   {
-        string pattern = "identifier ['\"]\\w+.*?.\\w+['\"]";
-        var result = "";
-
-        RegexOptions options = RegexOptions.Multiline;
+        var addSinglePermissionArgument = new Argument<string>
+            (name: "permission", description: "Single permission to add", getDefaultValue: () => "NotAnPermission");
         
-        foreach (Match m in Regex.Matches(output, pattern, options).Cast<Match>())
+        var addPermissionsOption = new Option<string[]>(
+                name: "--add-multiple",
+                description: "Strings to search for when deleting entries.")
+            { IsRequired = false, AllowMultipleArgumentsPerToken = true};
+        addPermissionsOption.AddAlias("-m");
+
+        var defaultCommand = new Command("default", "Set permission to use a microphone and a camera on the device.")
+            {
+                appPathArgument
+            };
+
+        var addCommand = new Command("add", "Set permission or permissions")
         {
-            Console.WriteLine($"'{m.Value}' found at index {m.Index}.");
-            result = m.Value;
-            result = result.Replace("identifier ", "");
-            result = result.Replace("\"", "");
+            appPathArgument,
+            addSinglePermissionArgument,
+            addPermissionsOption
+        };
+
+
+        var rootCommand = new RootCommand(description: "Mac Permission App")
+        {
+            defaultCommand,
+            addCommand
+        };
+
+        defaultCommand.SetHandler((appPathArgumentValue) =>
+        {
+            Console.WriteLine(Services.SetPermissions(appPathArgumentValue, UtilCommands.Camera));
+            Console.WriteLine(Services.SetPermissions(appPathArgumentValue, UtilCommands.Microphone));
+            Console.WriteLine(Services.SetPermissions(appPathArgumentValue, UtilCommands.ScreenCapture));
+        }, appPathArgument);
+        
+        addCommand.SetHandler((appPathArgumentValue, singlePermission, permissionsArray) =>
+        {
+            if (permissionsArray.Length == 0)
+            {
+                SetPermissionByString(appPathArgumentValue, singlePermission);
+            }
+            else
+            {
+                foreach (var permission in permissionsArray)
+                {
+                    SetPermissionByString(appPathArgumentValue, permission);
+                }    
+            }
+
+            
+        }, appPathArgument, addSinglePermissionArgument, addPermissionsOption);
+        
+        var parser = new CommandLineBuilder(rootCommand)
+            .UseDefaults()
+            .UseHelp(ctx =>
+            {
+                ctx.HelpBuilder.CustomizeSymbol(addCommand,
+                    firstColumnText: "add <path> <permission> \nOR \nadd <path> -m <perm1> <perm2> etc.",
+                    secondColumnText: $"First command allows to add single permission to an app," +
+                                      $"syntax is quite plain.\n" +
+                                      $"The second allows to add many commands, just type it one by one " +
+                                      $"and divide them by space.\n" +
+                                      $"List of all available permissions is here: " +
+                                      $"{string.Join(", ", Enum.GetNames(typeof(UtilCommands)))}.");
+                ctx.HelpBuilder.CustomizeLayout(
+                    _ =>
+                        HelpBuilder.Default
+                            .GetLayout()
+                            .Skip(1) // Skip the default command description section.
+                            .Prepend(
+                                _ => Spectre.Console.AnsiConsole.Write(
+                                    new FigletText(rootCommand.Description!))
+                            ));
+            })
+            .Build();
+
+        
+        
+        return await parser.InvokeAsync(args);
+    }
+
+    private static void SetPermissionByString(string appPathArgumentValue, string permission)
+    {
+        if (Enum.IsDefined(typeof(UtilCommands), permission))
+        {
+            var realPermission = (UtilCommands)Enum.Parse(typeof(UtilCommands), permission);
+            Console.WriteLine(Services.SetPermissions(appPathArgumentValue, realPermission));
         }
-        return result;
-   }
-
-string GetAppId(string appUrl) 
-{
-    var arguments = "-dr - " + "\"" + appUrl + "\"";
-    var rawAppInfo = StartProcess("codesign", arguments);
-    var test = FindId(rawAppInfo);
-    return test;
-}
-
-string StartProcess(string appName, string arguments) 
-{
-    var psi = new ProcessStartInfo();
-    psi.FileName = appName;
-    psi.Arguments = arguments;
-    psi.UseShellExecute = false;
-    psi.RedirectStandardOutput = true;
-
-    using var process = Process.Start(psi);
-    using StreamReader reader = process.StandardOutput;
-
-    return reader.ReadToEnd();
+        else
+        {
+            Console.WriteLine($"Permission {permission} does not exists.");
+        }
+    }
 }
