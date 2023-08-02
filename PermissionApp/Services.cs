@@ -36,10 +36,11 @@ class Services
             
             foreach (var m in Regex.Matches(output, pattern, options).Cast<Match>())
             {
-                Console.WriteLine($"Internal app identifier '{m.Value}' has been found.");
                 result = m.Value;
                 result = result.Replace("identifier ", "");
                 result = result.Replace("\"", "");
+                
+                Console.WriteLine($"Internal app identifier `{result}` has been found.");
             }
             return result;
     }

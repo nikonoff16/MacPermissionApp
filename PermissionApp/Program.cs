@@ -1,4 +1,8 @@
 ﻿using System.CommandLine;
+using System.CommandLine.Builder;
+using System.CommandLine.Help;
+using System.CommandLine.Parsing;
+using Spectre.Console;
 
 namespace PermissionApp;
 
@@ -23,15 +27,19 @@ class Program
                 appPathArgument
             };
 
-        var addCommand = new Command("add", "Set permission or permissions");
-        addCommand.AddArgument(appPathArgument);
-        addCommand.AddArgument(addSinglePermissionArgument);
-        addCommand.AddOption(addPermissionsOption);
+        var addCommand = new Command("add", "Set permission or permissions")
+        {
+            appPathArgument,
+            addSinglePermissionArgument,
+            addPermissionsOption
+        };
 
 
-        var rootCommand = new RootCommand();
-        rootCommand.AddCommand(defaultCommand);
-        rootCommand.AddCommand(addCommand);
+        var rootCommand = new RootCommand(description: "Mac Permission App")
+        {
+            defaultCommand,
+            addCommand
+        };
 
         defaultCommand.SetHandler((appPathArgumentValue) =>
         {
@@ -56,7 +64,34 @@ class Program
 
             
         }, appPathArgument, addSinglePermissionArgument, addPermissionsOption);
-        return await rootCommand.InvokeAsync(args);
+        
+        var parser = new CommandLineBuilder(rootCommand)
+            .UseDefaults()
+            .UseHelp(ctx =>
+            {
+                ctx.HelpBuilder.CustomizeSymbol(addCommand,
+                    firstColumnText: "add <path> <permission> \nOR \nadd <path> -m <perm1> <perm2> etc.",
+                    secondColumnText: $"First command allows to add single permission to an app," +
+                                      $"syntax is quite plain.\n" +
+                                      $"The second allows to add many commands, just type it one by one " +
+                                      $"and divide them by space.\n" +
+                                      $"List of all available permissions is here: " +
+                                      $"{string.Join(", ", Enum.GetNames(typeof(UtilCommands)))}.");
+                ctx.HelpBuilder.CustomizeLayout(
+                    _ =>
+                        HelpBuilder.Default
+                            .GetLayout()
+                            .Skip(1) // Skip the default command description section.
+                            .Prepend(
+                                _ => Spectre.Console.AnsiConsole.Write(
+                                    new FigletText(rootCommand.Description!))
+                            ));
+            })
+            .Build();
+
+        
+        
+        return await parser.InvokeAsync(args);
     }
 
     private static void SetPermissionByString(string appPathArgumentValue, string permission)
